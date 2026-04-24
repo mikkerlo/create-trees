@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Create Mod 2x2 Tree Farm Layout</title>
+<style>
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #1a1a1a;
+    color: #e0e0e0;
+    margin: 0;
+    padding: 20px;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { margin-top: 0; color: #81c784; }
+  .controls {
+    display: flex; gap: 20px; align-items: center;
+    background: #2a2a2a; padding: 15px; border-radius: 8px;
+    margin-bottom: 20px;
+  }
+  label { font-weight: 600; }
+  select {
+    background: #1a1a1a; color: #e0e0e0;
+    border: 1px solid #555; padding: 6px 10px; border-radius: 4px;
+    font-size: 16px;
+  }
+  .stats {
+    display: flex; gap: 24px; margin-left: auto;
+    font-size: 18px;
+  }
+  .stat .label { color: #888; font-size: 13px; display: block; }
+  .stat .value { font-size: 22px; font-weight: 700; color: #81c784; }
+  canvas {
+    background: #2a2a2a; border-radius: 8px;
+    display: block; margin: 0 auto;
+  }
+  .legend {
+    margin-top: 14px; display: flex; gap: 20px; justify-content: center;
+    font-size: 14px;
+  }
+  .swatch {
+    display: inline-block; width: 14px; height: 14px;
+    vertical-align: middle; margin-right: 6px; border-radius: 2px;
+  }
+  footer { margin-top: 24px; text-align: center; color: #777; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Create Mod – 2x2 Tree Farm Layout (rotating bearing)</h1>
+  <div class="controls">
+    <label for="chassis">Target chassis:</label>
+    <select id="chassis"></select>
+    <label style="margin-left:10px">Strategy:</label>
+    <label><input type="radio" name="strat" value="optimal" checked> Optimal</label>
+    <label><input type="radio" name="strat" value="structured"> Structured 3-grid</label>
+  </div>
+  <div class="controls">
+    <label for="current">Current chassis:</label>
+    <input type="range" id="current" min="3" max="17" value="17" step="1" style="flex:1; max-width:400px">
+    <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">17 (R=16)</span>
+    <div class="stats">
+      <div class="stat"><span class="label">Radius (target/now)</span><span class="value" id="stat-radius">-</span></div>
+      <div class="stat"><span class="label">Trees (now/total)</span><span class="value" id="stat-trees">-</span></div>
+      <div class="stat"><span class="label">Saplings (now/total)</span><span class="value" id="stat-saplings">-</span></div>
+      <div class="stat"><span class="label">vs optimal</span><span class="value" id="stat-gap">-</span></div>
+    </div>
+  </div>
+  <canvas id="grid" width="900" height="900"></canvas>
+  <div class="legend">
+    <span><span class="swatch" style="background:#388e3c"></span>Active tree (in current cutting disc)</span>
+    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Future tree (outside current disc)</span>
+    <span><span class="swatch" style="background:#ffb300"></span>Mechanical bearing</span>
+    <span><span class="swatch" style="background:#444"></span>Target reachable disc</span>
+  </div>
+  <footer>Layouts proven optimal by OR-tools CP-SAT. Saplings = 4 x trees (one per footprint tile).</footer>
+</div>
+<script>
+const SOLUTIONS = {"3": {"radius": 2, "optimal": [], "structured": []}, "4": {"radius": 3, "optimal": [[-2, -2], [-2, 1], [1, -2], [1, 1]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1]]}, "5": {"radius": 4, "optimal": [[-3, -2], [-3, 1], [1, -3], [2, 1]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1]]}, "6": {"radius": 5, "optimal": [[-4, -3], [-4, 0], [-3, 3], [-1, -4], [0, 3], [2, -4], [3, -1], [3, 2]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1]]}, "7": {"radius": 6, "optimal": [[-5, -1], [-5, 2], [-3, -5], [-2, -2], [-2, 1], [-2, 4], [0, -5], [1, 1], [1, 4], [3, -4], [4, -1], [4, 2]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-2, -5], [1, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-2, 4], [1, 4]]}, "8": {"radius": 7, "optimal": [[-6, -2], [-5, 3], [-4, -5], [-3, 0], [-2, 5], [-1, -6], [-1, -3], [0, 2], [1, 5], [2, -6], [2, -1], [4, 3], [5, -3], [5, 0]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-2, -5], [1, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-2, 4], [1, 4]]}, "9": {"radius": 8, "optimal": [[-7, -2], [-7, 1], [-6, 4], [-5, -6], [-4, -3], [-4, 0], [-3, 3], [-2, -7], [-2, 6], [-1, -4], [0, 3], [1, -7], [1, 6], [2, -4], [2, -1], [3, 2], [4, 5], [5, -5], [6, -2], [6, 1]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4]]}, "10": {"radius": 9, "optimal": [[-8, -2], [-8, 1], [-7, -5], [-7, 4], [-5, -2], [-5, 1], [-4, -8], [-4, -5], [-3, 4], [-3, 7], [-2, -2], [-2, 1], [-1, -8], [-1, -5], [0, 4], [0, 7], [1, -2], [1, 1], [2, -8], [2, -5], [3, 7], [4, -2], [4, 1], [4, 4], [5, -6], [7, -3], [7, 0], [7, 3]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-2, -8], [1, -8], [-8, -2], [7, -2], [-8, 1], [7, 1], [-2, 7], [1, 7]]}, "11": {"radius": 10, "optimal": [[-9, -3], [-9, 0], [-9, 3], [-8, -6], [-6, -2], [-6, 1], [-6, 4], [-6, 7], [-5, -8], [-5, -5], [-3, -2], [-3, 1], [-3, 4], [-3, 8], [-2, -9], [-2, -6], [0, -3], [0, 5], [0, 8], [1, -9], [1, -6], [2, 0], [3, 5], [3, 8], [4, -8], [4, -4], [5, -1], [5, 2], [6, 6], [7, -6], [8, -3], [8, 0], [8, 3]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-5, -8], [-2, -8], [1, -8], [4, -8], [-8, -5], [7, -5], [-8, -2], [7, -2], [-8, 1], [7, 1], [-8, 4], [7, 4], [-5, 7], [-2, 7], [1, 7], [4, 7]]}, "12": {"radius": 11, "optimal": [[-10, -4], [-10, -1], [-10, 2], [-9, 5], [-7, -8], [-7, -4], [-7, -1], [-6, 2], [-6, 5], [-6, 8], [-4, -10], [-4, -6], [-4, -3], [-3, 0], [-3, 3], [-3, 6], [-2, 9], [-1, -10], [-1, -7], [-1, -3], [0, 3], [0, 6], [1, 9], [2, -10], [2, -7], [2, -4], [3, -1], [3, 2], [3, 5], [4, 8], [5, -9], [5, -6], [6, -3], [6, 0], [6, 3], [7, 6], [8, -6], [9, -3], [9, 0], [9, 3]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-5, -8], [-2, -8], [1, -8], [4, -8], [-8, -5], [7, -5], [-8, -2], [7, -2], [-8, 1], [7, 1], [-8, 4], [7, 4], [-5, 7], [-2, 7], [1, 7], [4, 7]]}, "13": {"radius": 12, "optimal": [[-11, -4], [-11, -1], [-11, 2], [-10, 5], [-9, -7], [-8, -4], [-8, -1], [-8, 2], [-7, 5], [-7, 8], [-6, -10], [-6, -7], [-5, -2], [-5, 1], [-4, 4], [-4, 7], [-4, 10], [-3, -11], [-3, -8], [-3, -5], [-2, -2], [-2, 1], [-1, 4], [-1, 7], [-1, 10], [0, -11], [0, -8], [0, -5], [1, -2], [1, 1], [2, 4], [2, 7], [2, 10], [3, -11], [3, -8], [3, -5], [4, -2], [4, 1], [5, 6], [5, 9], [6, -9], [6, -6], [7, -3], [7, 0], [7, 3], [8, 6], [9, -6], [10, -3], [10, 0], [10, 3]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-8, -8], [-5, -8], [-2, -8], [1, -8], [4, -8], [7, -8], [-8, -5], [7, -5], [-8, -2], [7, -2], [-8, 1], [7, 1], [-8, 4], [7, 4], [-8, 7], [-5, 7], [-2, 7], [1, 7], [4, 7], [7, 7], [-2, -11], [1, -11], [-11, -2], [10, -2], [-11, 1], [10, 1], [-2, 10], [1, 10]]}, "14": {"radius": 13, "optimal": [[-12, -3], [-12, 0], [-12, 3], [-11, -6], [-10, 6], [-9, -9], [-9, -3], [-9, 0], [-9, 3], [-8, 9], [-7, -6], [-7, 6], [-6, -9], [-6, 0], [-6, 3], [-5, -12], [-5, -3], [-5, 11], [-4, -6], [-4, 8], [-3, -9], [-3, 0], [-3, 5], [-2, -12], [-2, -3], [-2, 11], [-1, -6], [-1, 8], [0, -9], [0, 5], [1, -12], [1, 11], [2, -6], [2, -3], [2, 1], [2, 8], [3, -9], [3, 5], [4, -12], [4, 11], [5, -4], [5, -1], [5, 2], [5, 8], [6, -7], [6, 5], [7, -10], [8, -4], [8, -1], [8, 2], [8, 8], [9, -7], [9, 5], [11, -4], [11, -1], [11, 2]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-8, -8], [-5, -8], [-2, -8], [1, -8], [4, -8], [7, -8], [-8, -5], [7, -5], [-8, -2], [7, -2], [-8, 1], [7, 1], [-8, 4], [7, 4], [-8, 7], [-5, 7], [-2, 7], [1, 7], [4, 7], [7, 7], [-5, -11], [-2, -11], [1, -11], [4, -11], [-11, -5], [10, -5], [-11, -2], [10, -2], [-11, 1], [10, 1], [-11, 4], [10, 4], [-5, 10], [-2, 10], [1, 10], [4, 10]]}, "15": {"radius": 14, "optimal": [[-13, -5], [-13, -2], [-13, 1], [-13, 4], [-11, -8], [-11, 7], [-10, -2], [-10, 1], [-9, -5], [-9, 4], [-8, -11], [-8, -8], [-8, 7], [-8, 10], [-6, -5], [-6, -2], [-6, 1], [-6, 4], [-5, -13], [-5, -10], [-5, 9], [-5, 12], [-3, -7], [-3, -3], [-3, 0], [-3, 3], [-3, 6], [-2, -13], [-2, -10], [-2, 9], [-2, 12], [0, -7], [0, -4], [0, 3], [0, 6], [1, -13], [1, -10], [1, 9], [1, 12], [2, 0], [3, -6], [3, -3], [3, 3], [3, 6], [4, -13], [4, -9], [4, 9], [4, 12], [6, -5], [6, -2], [6, 1], [6, 4], [7, -11], [7, -8], [7, 7], [7, 10], [9, -5], [9, -2], [9, 1], [9, 4], [10, -8], [10, 7], [12, -5], [12, -2], [12, 1], [12, 4]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-8, -8], [-5, -8], [-2, -8], [1, -8], [4, -8], [7, -8], [-8, -5], [7, -5], [-8, -2], [7, -2], [-8, 1], [7, 1], [-8, 4], [7, 4], [-8, 7], [-5, 7], [-2, 7], [1, 7], [4, 7], [7, 7], [-8, -11], [-5, -11], [-2, -11], [1, -11], [4, -11], [7, -11], [-11, -8], [10, -8], [-11, -5], [10, -5], [-11, -2], [10, -2], [-11, 1], [10, 1], [-11, 4], [10, 4], [-11, 7], [10, 7], [-8, 10], [-5, 10], [-2, 10], [1, 10], [4, 10], [7, 10]]}, "16": {"radius": 15, "optimal": [[-14, -5], [-14, -2], [-14, 1], [-14, 4], [-12, -9], [-11, -6], [-11, -3], [-11, 0], [-11, 3], [-11, 6], [-11, 9], [-9, -12], [-9, -9], [-8, -6], [-8, -3], [-8, 0], [-8, 3], [-8, 6], [-8, 9], [-7, 12], [-6, -13], [-5, -8], [-5, -5], [-5, -2], [-5, 1], [-5, 4], [-5, 7], [-4, 10], [-4, 13], [-3, -14], [-3, -11], [-2, -5], [-2, -2], [-2, 1], [-2, 4], [-2, 7], [-1, -8], [-1, 10], [-1, 13], [0, -14], [0, -11], [1, -5], [1, -2], [1, 1], [1, 4], [1, 7], [2, -8], [2, 10], [2, 13], [3, -14], [3, -11], [4, -4], [4, -1], [4, 3], [4, 6], [5, -7], [5, 9], [5, 12], [6, -13], [6, -10], [7, -4], [7, -1], [7, 2], [7, 5], [8, -7], [8, 8], [8, 11], [9, -11], [10, -4], [10, -1], [10, 2], [10, 5], [11, -8], [11, 8], [13, -5], [13, -2], [13, 1], [13, 4]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-8, -8], [-5, -8], [-2, -8], [1, -8], [4, -8], [7, -8], [-8, -5], [7, -5], [-8, -2], [7, -2], [-8, 1], [7, 1], [-8, 4], [7, 4], [-8, 7], [-5, 7], [-2, 7], [1, 7], [4, 7], [7, 7], [-8, -11], [-5, -11], [-2, -11], [1, -11], [4, -11], [7, -11], [-11, -8], [10, -8], [-11, -5], [10, -5], [-11, -2], [10, -2], [-11, 1], [10, 1], [-11, 4], [10, 4], [-11, 7], [10, 7], [-8, 10], [-5, 10], [-2, 10], [1, 10], [4, 10], [7, 10], [-5, -14], [-2, -14], [1, -14], [4, -14], [-14, -5], [13, -5], [-14, -2], [13, -2], [-14, 1], [13, 1], [-14, 4], [13, 4], [-5, 13], [-2, 13], [1, 13], [4, 13]]}, "17": {"radius": 16, "optimal": [[-15, -3], [-15, 0], [-15, 3], [-14, -6], [-14, 6], [-13, -9], [-12, -3], [-12, 0], [-12, 3], [-12, 9], [-11, -6], [-11, 6], [-10, -12], [-10, -9], [-9, 0], [-9, 9], [-9, 12], [-8, -6], [-8, -3], [-8, 3], [-8, 6], [-7, -14], [-7, -11], [-6, 10], [-6, 13], [-5, -8], [-5, -5], [-5, -2], [-5, 1], [-5, 4], [-5, 7], [-4, -15], [-4, -12], [-3, 11], [-3, 14], [-2, -8], [-2, -5], [-2, -2], [-2, 1], [-2, 4], [-2, 7], [-1, -15], [-1, -12], [0, 11], [0, 14], [1, -9], [1, -5], [1, -2], [1, 4], [1, 8], [2, -15], [2, -12], [2, 1], [3, 11], [3, 14], [4, -8], [4, -5], [4, -2], [4, 4], [4, 7], [5, -14], [5, -11], [5, 1], [6, 10], [6, 13], [7, -7], [7, -4], [7, 5], [8, -13], [8, -10], [8, -1], [8, 2], [9, 8], [9, 11], [10, -7], [10, 5], [11, -10], [11, -4], [11, -1], [11, 2], [12, 8], [13, -7], [13, 5], [14, -4], [14, -1], [14, 2]], "structured": [[-2, -2], [1, -2], [-2, 1], [1, 1], [-5, -5], [-2, -5], [1, -5], [4, -5], [-5, -2], [4, -2], [-5, 1], [4, 1], [-5, 4], [-2, 4], [1, 4], [4, 4], [-8, -8], [-5, -8], [-2, -8], [1, -8], [4, -8], [7, -8], [-8, -5], [7, -5], [-8, -2], [7, -2], [-8, 1], [7, 1], [-8, 4], [7, 4], [-8, 7], [-5, 7], [-2, 7], [1, 7], [4, 7], [7, 7], [-11, -11], [-8, -11], [-5, -11], [-2, -11], [1, -11], [4, -11], [7, -11], [10, -11], [-11, -8], [10, -8], [-11, -5], [10, -5], [-11, -2], [10, -2], [-11, 1], [10, 1], [-11, 4], [10, 4], [-11, 7], [10, 7], [-11, 10], [-8, 10], [-5, 10], [-2, 10], [1, 10], [4, 10], [7, 10], [10, 10], [-5, -14], [-2, -14], [1, -14], [4, -14], [-14, -5], [13, -5], [-14, -2], [13, -2], [-14, 1], [13, 1], [-14, 4], [13, 4], [-5, 13], [-2, 13], [1, 13], [4, 13]]}};
+const SAPLINGS_PER_TREE = 4;
+const canvas = document.getElementById('grid');
+const ctx = canvas.getContext('2d');
+const select = document.getElementById('chassis');
+
+Object.keys(SOLUTIONS).map(Number).sort((a,b) => a-b).forEach(n => {
+  const opt = document.createElement('option');
+  opt.value = n;
+  const s = SOLUTIONS[n];
+  opt.textContent = `${n} chassis (radius ${s.radius}, opt ${s.optimal.length} / struct ${s.structured.length})`;
+  select.appendChild(opt);
+});
+
+function currentStrategy() {
+  return document.querySelector('input[name="strat"]:checked').value;
+}
+
+const currentSlider = document.getElementById('current');
+const currentLabel = document.getElementById('current-label');
+
+function isTreeActive(ax, ay, Rc2) {
+  // Tree is active if all 4 footprint tiles are within current cutting radius.
+  for (const [dx, dy] of [[0,0],[1,0],[0,1],[1,1]]) {
+    const tx = ax + dx, ty = ay + dy;
+    if (tx * tx + ty * ty > Rc2) return false;
+  }
+  return true;
+}
+
+function render(N) {
+  const sol = SOLUTIONS[N];
+  const R = sol.radius;
+  const strat = currentStrategy();
+  const trees = sol[strat];
+  const optCount = sol.optimal.length;
+  const treeCount = trees.length;
+
+  // Clamp current chassis to <= target.
+  let Nc = Number(currentSlider.value);
+  if (Nc > N) Nc = N;
+  const Rc = Nc - 1;
+  const Rc2 = Rc * Rc;
+  currentLabel.textContent = `${Nc} (R=${Rc})`;
+
+  const activeTrees = trees.filter(([ax, ay]) => isTreeActive(ax, ay, Rc2));
+  const activeCount = activeTrees.length;
+  const saplings = treeCount * SAPLINGS_PER_TREE;
+  const activeSaplings = activeCount * SAPLINGS_PER_TREE;
+  const gap = treeCount - optCount;
+
+  document.getElementById('stat-radius').textContent = `${R} / ${Rc}`;
+  document.getElementById('stat-trees').textContent = `${activeCount} / ${treeCount}`;
+  document.getElementById('stat-saplings').textContent = `${activeSaplings} / ${saplings}`;
+  const gapEl = document.getElementById('stat-gap');
+  if (strat === 'optimal') {
+    gapEl.textContent = '0';
+    gapEl.style.color = '#81c784';
+  } else {
+    gapEl.textContent = (gap >= 0 ? '+' : '') + gap;
+    gapEl.style.color = gap < 0 ? '#ef5350' : '#81c784';
+  }
+
+  // Grid spans tiles from -R to R inclusive (size 2R+1 tiles).
+  const tilesPerSide = 2 * R + 1;
+  const cell = Math.floor(Math.min(canvas.width, canvas.height) / (tilesPerSide + 2));
+  const gridPx = cell * tilesPerSide;
+  const offsetX = Math.floor((canvas.width - gridPx) / 2);
+  const offsetY = Math.floor((canvas.height - gridPx) / 2);
+
+  // World tile (tx,ty) -> canvas (x,y) of tile's top-left.
+  // Screen y grows downward; world y grows upward => flip.
+  function tileToPx(tx, ty) {
+    const col = tx + R;       // 0..2R
+    const row = R - ty;       // 0..2R, top is +R
+    return [offsetX + col * cell, offsetY + row * cell];
+  }
+
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Out-of-range backdrop
+  ctx.fillStyle = '#222';
+  ctx.fillRect(offsetX, offsetY, gridPx, gridPx);
+
+  // Disc tiles
+  const R2 = R * R;
+  for (let tx = -R; tx <= R; tx++) {
+    for (let ty = -R; ty <= R; ty++) {
+      if (tx * tx + ty * ty <= R2) {
+        const [px, py] = tileToPx(tx, ty);
+        ctx.fillStyle = '#3a3a3a';
+        ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
+      }
+    }
+  }
+
+  // Tree footprints
+  trees.forEach(([ax, ay], idx) => {
+    const active = isTreeActive(ax, ay, Rc2);
+    const fillColor = active ? '#388e3c' : '#1b3a1c';
+    const strokeColor = active ? '#81c784' : '#4a704c';
+    const labelColor = active ? '#ffffff' : '#7aa17c';
+    for (const [dx, dy] of [[0,0],[1,0],[0,1],[1,1]]) {
+      const [px, py] = tileToPx(ax + dx, ay + dy);
+      ctx.fillStyle = fillColor;
+      ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
+    }
+    const [px, py] = tileToPx(ax, ay + 1);
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2;
+    if (!active) ctx.setLineDash([4, 3]);
+    ctx.strokeRect(px + 1, py + 1, cell * 2 - 2, cell * 2 - 2);
+    ctx.setLineDash([]);
+    if (cell >= 14) {
+      ctx.fillStyle = labelColor;
+      ctx.font = `bold ${Math.max(10, Math.floor(cell * 0.6))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(idx + 1), px + cell, py + cell);
+    }
+  });
+
+  // Current cutting boundary (smooth circle for visual reference)
+  if (Nc < N) {
+    ctx.strokeStyle = '#ffb300';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    const [cx0, cy0] = tileToPx(0, 0);
+    const cx = cx0 + cell / 2;
+    const cy = cy0 + cell / 2;
+    ctx.arc(cx, cy, (Rc + 0.5) * cell, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Bearing
+  const [bx, by] = tileToPx(0, 0);
+  ctx.fillStyle = '#ffb300';
+  ctx.fillRect(bx + 1, by + 1, cell - 2, cell - 2);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = `bold ${Math.max(10, Math.floor(cell * 0.7))}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('B', bx + cell / 2, by + cell / 2);
+
+  // Axis ticks every 5 tiles
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#888';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let tx = -R; tx <= R; tx++) {
+    if (tx % 5 === 0) {
+      const [px] = tileToPx(tx, 0);
+      ctx.fillText(String(tx), px + cell / 2, offsetY + gridPx + 4);
+    }
+  }
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let ty = -R; ty <= R; ty++) {
+    if (ty % 5 === 0) {
+      const [, py] = tileToPx(0, ty);
+      ctx.fillText(String(ty), offsetX - 4, py + cell / 2);
+    }
+  }
+}
+
+const STORAGE_KEY = 'create-tree-farm-prefs-v1';
+function savePrefs() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      target: select.value,
+      current: currentSlider.value,
+      strategy: currentStrategy(),
+    }));
+  } catch (e) { /* private mode etc -- ignore */ }
+}
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+function rerender() {
+  render(Number(select.value));
+  savePrefs();
+}
+select.addEventListener('change', () => {
+  // When the target changes, keep "current" if still valid; otherwise snap
+  // it to the new (smaller) target.
+  if (Number(currentSlider.value) > Number(select.value)) {
+    currentSlider.value = select.value;
+  }
+  rerender();
+});
+currentSlider.addEventListener('input', rerender);
+document.querySelectorAll('input[name="strat"]').forEach(
+    el => el.addEventListener('change', rerender));
+
+const prefs = loadPrefs();
+if (prefs && SOLUTIONS[prefs.target]) {
+  select.value = prefs.target;
+  currentSlider.value = prefs.current || prefs.target;
+  const stratEl = document.querySelector(
+      `input[name="strat"][value="${prefs.strategy}"]`);
+  if (stratEl) stratEl.checked = true;
+} else {
+  select.value = '17';
+  currentSlider.value = '17';
+}
+render(Number(select.value));
+</script>
+</body>
+</html>
