@@ -77,20 +77,20 @@ html = f"""<!DOCTYPE html>
     <label><input type="radio" name="strat" value="structured"> Structured 3-grid</label>
   </div>
   <div class="controls">
-    <label for="current">Current chassis:</label>
-    <input type="range" id="current" min="3" max="17" value="17" step="1" style="flex:1; max-width:400px">
-    <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">17 (R=16)</span>
+    <label for="current">Inner ring already covered (chassis):</label>
+    <input type="range" id="current" min="3" max="17" value="3" step="1" style="flex:1; max-width:400px">
+    <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">3 (R=2)</span>
     <div class="stats">
-      <div class="stat"><span class="label">Radius (target/now)</span><span class="value" id="stat-radius">-</span></div>
-      <div class="stat"><span class="label">Trees (now/total)</span><span class="value" id="stat-trees">-</span></div>
-      <div class="stat"><span class="label">Saplings (now/total)</span><span class="value" id="stat-saplings">-</span></div>
+      <div class="stat"><span class="label">Radius (target/inner)</span><span class="value" id="stat-radius">-</span></div>
+      <div class="stat"><span class="label">Trees (pending/total)</span><span class="value" id="stat-trees">-</span></div>
+      <div class="stat"><span class="label">Saplings (pending/total)</span><span class="value" id="stat-saplings">-</span></div>
       <div class="stat"><span class="label">vs optimal</span><span class="value" id="stat-gap">-</span></div>
     </div>
   </div>
   <canvas id="grid" width="900" height="900"></canvas>
   <div class="legend">
-    <span><span class="swatch" style="background:#388e3c"></span>Active tree (in current cutting disc)</span>
-    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Future tree (outside current disc)</span>
+    <span><span class="swatch" style="background:#388e3c"></span>Pending tree (outer ring, still to plant)</span>
+    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Already covered (inside inner ring)</span>
     <span><span class="swatch" style="background:#ffb300"></span>Mechanical bearing</span>
     <span><span class="swatch" style="background:#444"></span>Target reachable disc</span>
   </div>
@@ -119,12 +119,14 @@ const currentSlider = document.getElementById('current');
 const currentLabel = document.getElementById('current-label');
 
 function isTreeActive(ax, ay, Rc2) {{
-  // Tree is active if all 4 footprint tiles are within current cutting radius.
+  // Reversed (outside-in build): tree is "pending/active" if at least one
+  // footprint tile lies OUTSIDE the inner-cover ring; trees fully inside
+  // are considered already covered.
   for (const [dx, dy] of [[0,0],[1,0],[0,1],[1,1]]) {{
     const tx = ax + dx, ty = ay + dy;
-    if (tx * tx + ty * ty > Rc2) return false;
+    if (tx * tx + ty * ty > Rc2) return true;
   }}
-  return true;
+  return false;
 }}
 
 function render(N) {{
@@ -220,8 +222,8 @@ function render(N) {{
     }}
   }});
 
-  // Current cutting boundary (smooth circle for visual reference)
-  if (Nc < N) {{
+  // Inner-cover boundary (everything inside is "already covered").
+  if (Nc > 3) {{
     ctx.strokeStyle = '#ffb300';
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
@@ -290,8 +292,7 @@ function rerender() {{
   savePrefs();
 }}
 select.addEventListener('change', () => {{
-  // When the target changes, keep "current" if still valid; otherwise snap
-  // it to the new (smaller) target.
+  // When the target shrinks, clamp the inner-cover slider so it stays valid.
   if (Number(currentSlider.value) > Number(select.value)) {{
     currentSlider.value = select.value;
   }}
@@ -304,13 +305,13 @@ document.querySelectorAll('input[name="strat"]').forEach(
 const prefs = loadPrefs();
 if (prefs && SOLUTIONS[prefs.target]) {{
   select.value = prefs.target;
-  currentSlider.value = prefs.current || prefs.target;
+  currentSlider.value = prefs.current || '3';
   const stratEl = document.querySelector(
       `input[name="strat"][value="${{prefs.strategy}}"]`);
   if (stratEl) stratEl.checked = true;
 }} else {{
   select.value = '17';
-  currentSlider.value = '17';
+  currentSlider.value = '3';
 }}
 render(Number(select.value));
 </script>
