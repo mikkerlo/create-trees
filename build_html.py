@@ -77,22 +77,22 @@ html = f"""<!DOCTYPE html>
     <label><input type="radio" name="strat" value="structured"> Structured 3-grid</label>
   </div>
   <div class="controls">
-    <label for="current">Inner ring already covered (chassis):</label>
-    <input type="range" id="current" min="3" max="17" value="3" step="1" style="flex:1; max-width:400px">
-    <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">3 (R=2)</span>
+    <label for="current">Saws placed (outside-in):</label>
+    <input type="range" id="current" min="0" max="16" value="16" step="1" style="flex:1; max-width:400px">
+    <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">16 / 16</span>
     <div class="stats">
-      <div class="stat"><span class="label">Radius (target/inner)</span><span class="value" id="stat-radius">-</span></div>
-      <div class="stat"><span class="label">Trees (pending/total)</span><span class="value" id="stat-trees">-</span></div>
-      <div class="stat"><span class="label">Saplings (pending/total)</span><span class="value" id="stat-saplings">-</span></div>
+      <div class="stat"><span class="label">Radius</span><span class="value" id="stat-radius">-</span></div>
+      <div class="stat"><span class="label">Trees (cuttable/total)</span><span class="value" id="stat-trees">-</span></div>
+      <div class="stat"><span class="label">Saplings (cuttable/total)</span><span class="value" id="stat-saplings">-</span></div>
       <div class="stat"><span class="label">vs optimal</span><span class="value" id="stat-gap">-</span></div>
     </div>
   </div>
   <canvas id="grid" width="900" height="900"></canvas>
   <div class="legend">
-    <span><span class="swatch" style="background:#388e3c"></span>Pending tree (any tile in the dark ring -- not yet fully cuttable)</span>
-    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Covered tree (entire footprint in the warm inner zone)</span>
-    <span><span class="swatch" style="background:#4a3a26"></span>Already-covered tiles</span>
-    <span><span class="swatch" style="background:#3a3a3a"></span>Pending tiles</span>
+    <span><span class="swatch" style="background:#388e3c"></span>Cuttable tree (entire footprint in the warm outer annulus)</span>
+    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Not yet cuttable (some tile still in inner uncovered zone)</span>
+    <span><span class="swatch" style="background:#4a3a26"></span>Cutting annulus (saws placed)</span>
+    <span><span class="swatch" style="background:#3a3a3a"></span>Inner uncovered (no saw yet)</span>
     <span><span class="swatch" style="background:#ffb300"></span>Mechanical bearing</span>
   </div>
   <footer>Layouts proven optimal by OR-tools CP-SAT. Saplings = 4 x trees (one per footprint tile).</footer>
@@ -119,15 +119,14 @@ function currentStrategy() {{
 const currentSlider = document.getElementById('current');
 const currentLabel = document.getElementById('current-label');
 
-function isTreeActive(ax, ay, Rc2) {{
-  // Reversed (outside-in build): tree is "pending/active" if at least one
-  // footprint tile lies OUTSIDE the inner-cover ring; trees fully inside
-  // are considered already covered.
+function isTreeCuttable(ax, ay, Ru2) {{
+  // Tree is cuttable iff every footprint tile is in the cutting annulus,
+  // i.e. strictly outside the inner-uncovered disc of radius Ru.
   for (const [dx, dy] of [[0,0],[1,0],[0,1],[1,1]]) {{
     const tx = ax + dx, ty = ay + dy;
-    if (tx * tx + ty * ty > Rc2) return true;
+    if (tx * tx + ty * ty <= Ru2) return false;
   }}
-  return false;
+  return true;
 }}
 
 function render(N) {{
@@ -138,22 +137,24 @@ function render(N) {{
   const optCount = sol.optimal.length;
   const treeCount = trees.length;
 
-  // Clamp current chassis to <= target.
-  let Nc = Number(currentSlider.value);
-  if (Nc > N) Nc = N;
-  const Rc = Nc - 1;
-  const Rc2 = Rc * Rc;
-  currentLabel.textContent = `${{Nc}} (R=${{Rc}})`;
+  // Slider goes 0..R (saws placed, outside-in). Adjust max to current target.
+  currentSlider.max = R;
+  let K = Number(currentSlider.value);
+  if (K > R) {{ K = R; currentSlider.value = R; }}
+  if (K < 0) {{ K = 0; currentSlider.value = 0; }}
+  const Ru = R - K;            // inner-uncovered radius
+  const Ru2 = Ru * Ru;
+  currentLabel.textContent = `${{K}} / ${{R}}`;
 
-  const activeTrees = trees.filter(([ax, ay]) => isTreeActive(ax, ay, Rc2));
-  const activeCount = activeTrees.length;
+  const cuttable = trees.filter(([ax, ay]) => isTreeCuttable(ax, ay, Ru2));
+  const cuttableCount = cuttable.length;
   const saplings = treeCount * SAPLINGS_PER_TREE;
-  const activeSaplings = activeCount * SAPLINGS_PER_TREE;
+  const cuttableSaplings = cuttableCount * SAPLINGS_PER_TREE;
   const gap = treeCount - optCount;
 
-  document.getElementById('stat-radius').textContent = `${{R}} / ${{Rc}}`;
-  document.getElementById('stat-trees').textContent = `${{activeCount}} / ${{treeCount}}`;
-  document.getElementById('stat-saplings').textContent = `${{activeSaplings}} / ${{saplings}}`;
+  document.getElementById('stat-radius').textContent = `${{R}}`;
+  document.getElementById('stat-trees').textContent = `${{cuttableCount}} / ${{treeCount}}`;
+  document.getElementById('stat-saplings').textContent = `${{cuttableSaplings}} / ${{saplings}}`;
   const gapEl = document.getElementById('stat-gap');
   if (strat === 'optimal') {{
     gapEl.textContent = '0';
@@ -185,14 +186,15 @@ function render(N) {{
   ctx.fillStyle = '#222';
   ctx.fillRect(offsetX, offsetY, gridPx, gridPx);
 
-  // Disc tiles. Two shades: target-only (still to build) vs inner-cover.
+  // Disc tiles. Two shades: warm = cutting annulus (saws cover it),
+  // cool = inner uncovered (still need saws).
   const R2 = R * R;
   for (let tx = -R; tx <= R; tx++) {{
     for (let ty = -R; ty <= R; ty++) {{
       const d2 = tx * tx + ty * ty;
       if (d2 <= R2) {{
         const [px, py] = tileToPx(tx, ty);
-        ctx.fillStyle = (d2 <= Rc2) ? '#4a3a26' : '#3a3a3a';
+        ctx.fillStyle = (d2 > Ru2) ? '#4a3a26' : '#3a3a3a';
         ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
       }}
     }}
@@ -200,7 +202,7 @@ function render(N) {{
 
   // Tree footprints
   trees.forEach(([ax, ay], idx) => {{
-    const active = isTreeActive(ax, ay, Rc2);
+    const active = isTreeCuttable(ax, ay, Ru2);
     const fillColor = active ? '#388e3c' : '#1b3a1c';
     const strokeColor = active ? '#81c784' : '#4a704c';
     const labelColor = active ? '#ffffff' : '#7aa17c';
@@ -260,12 +262,12 @@ function render(N) {{
   }}
 }}
 
-const STORAGE_KEY = 'create-tree-farm-prefs-v1';
+const STORAGE_KEY = 'create-tree-farm-prefs-v2';
 function savePrefs() {{
   try {{
     localStorage.setItem(STORAGE_KEY, JSON.stringify({{
       target: select.value,
-      current: currentSlider.value,
+      saws: currentSlider.value,
       strategy: currentStrategy(),
     }}));
   }} catch (e) {{ /* private mode etc -- ignore */ }}
@@ -283,10 +285,7 @@ function rerender() {{
   savePrefs();
 }}
 select.addEventListener('change', () => {{
-  // When the target shrinks, clamp the inner-cover slider so it stays valid.
-  if (Number(currentSlider.value) > Number(select.value)) {{
-    currentSlider.value = select.value;
-  }}
+  // Slider max gets re-clamped inside render() based on the new target's R.
   rerender();
 }});
 currentSlider.addEventListener('input', rerender);
@@ -296,13 +295,19 @@ document.querySelectorAll('input[name="strat"]').forEach(
 const prefs = loadPrefs();
 if (prefs && SOLUTIONS[prefs.target]) {{
   select.value = prefs.target;
-  currentSlider.value = prefs.current || '3';
+  const targetR = SOLUTIONS[prefs.target].radius;
+  currentSlider.max = targetR;
+  let savedSaws = (prefs.saws !== undefined) ? Number(prefs.saws) : targetR;
+  if (savedSaws > targetR) savedSaws = targetR;
+  if (savedSaws < 0) savedSaws = 0;
+  currentSlider.value = savedSaws;
   const stratEl = document.querySelector(
       `input[name="strat"][value="${{prefs.strategy}}"]`);
   if (stratEl) stratEl.checked = true;
 }} else {{
   select.value = '17';
-  currentSlider.value = '3';
+  currentSlider.max = SOLUTIONS['17'].radius;
+  currentSlider.value = SOLUTIONS['17'].radius;
 }}
 render(Number(select.value));
 </script>
