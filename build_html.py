@@ -89,10 +89,11 @@ html = f"""<!DOCTYPE html>
   </div>
   <canvas id="grid" width="900" height="900"></canvas>
   <div class="legend">
-    <span><span class="swatch" style="background:#388e3c"></span>Pending tree (outer ring, still to plant)</span>
-    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Already covered (inside inner ring)</span>
+    <span><span class="swatch" style="background:#388e3c"></span>Pending tree (any tile in the dark ring -- not yet fully cuttable)</span>
+    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Covered tree (entire footprint in the warm inner zone)</span>
+    <span><span class="swatch" style="background:#4a3a26"></span>Already-covered tiles</span>
+    <span><span class="swatch" style="background:#3a3a3a"></span>Pending tiles</span>
     <span><span class="swatch" style="background:#ffb300"></span>Mechanical bearing</span>
-    <span><span class="swatch" style="background:#444"></span>Target reachable disc</span>
   </div>
   <footer>Layouts proven optimal by OR-tools CP-SAT. Saplings = 4 x trees (one per footprint tile).</footer>
 </div>
@@ -184,13 +185,14 @@ function render(N) {{
   ctx.fillStyle = '#222';
   ctx.fillRect(offsetX, offsetY, gridPx, gridPx);
 
-  // Disc tiles
+  // Disc tiles. Two shades: target-only (still to build) vs inner-cover.
   const R2 = R * R;
   for (let tx = -R; tx <= R; tx++) {{
     for (let ty = -R; ty <= R; ty++) {{
-      if (tx * tx + ty * ty <= R2) {{
+      const d2 = tx * tx + ty * ty;
+      if (d2 <= R2) {{
         const [px, py] = tileToPx(tx, ty);
-        ctx.fillStyle = '#3a3a3a';
+        ctx.fillStyle = (d2 <= Rc2) ? '#4a3a26' : '#3a3a3a';
         ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
       }}
     }}
@@ -222,19 +224,8 @@ function render(N) {{
     }}
   }});
 
-  // Inner-cover boundary (everything inside is "already covered").
-  if (Nc > 3) {{
-    ctx.strokeStyle = '#ffb300';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    ctx.beginPath();
-    const [cx0, cy0] = tileToPx(0, 0);
-    const cx = cx0 + cell / 2;
-    const cy = cy0 + cell / 2;
-    ctx.arc(cx, cy, (Rc + 0.5) * cell, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }}
+  // (Inner-cover area is shaded by the disc-tile loop above; no smooth
+  // circle here -- the integer-grid criterion would be misleading.)
 
   // Bearing
   const [bx, by] = tileToPx(0, 0);
