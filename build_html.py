@@ -131,9 +131,9 @@ html = f"""<!DOCTYPE html>
 <div class="container">
   <h1>Create Mod &ndash; 2x2 Tree Farm Layout (rotating bearing)</h1>
   <div class="controls">
-    <label for="current">Saws placed (outside-in):</label>
-    <input type="range" id="current" min="0" max="16" value="16" step="1" style="flex:1; min-width:280px; max-width:480px">
-    <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">16 / 16</span>
+    <label for="total">Total saws planned (T):</label>
+    <input type="range" id="total" min="0" max="16" value="16" step="1" style="flex:1; min-width:280px; max-width:480px">
+    <span id="total-label" style="font-weight:700; color:#ffb300; min-width:90px">16 / 16</span>
   </div>
   <div class="controls">
     <label for="chassis">Target chassis (radius):</label>
@@ -143,23 +143,31 @@ html = f"""<!DOCTYPE html>
     <label><input type="radio" name="strat" value="structured"> Structured 3-grid</label>
     <div class="stats">
       <div class="stat"><span class="label">Radius</span><span class="value" id="stat-radius">-</span></div>
-      <div class="stat"><span class="label">Trees</span><span class="value" id="stat-trees">-</span></div>
-      <div class="stat"><span class="label">Saplings</span><span class="value" id="stat-saplings">-</span></div>
-      <div class="stat"><span class="label">vs optimal</span><span class="value" id="stat-gap">-</span></div>
+      <div class="stat"><span class="label">Trees (cuttable/planned)</span><span class="value" id="stat-trees">-</span></div>
+      <div class="stat"><span class="label">Saplings (cuttable/planned)</span><span class="value" id="stat-saplings">-</span></div>
+      <div class="stat"><span class="label">vs optimal at T</span><span class="value" id="stat-gap">-</span></div>
     </div>
+  </div>
+  <div class="controls">
+    <label for="current">Saws placed (K of T):</label>
+    <input type="range" id="current" min="0" max="16" value="16" step="1" style="flex:1; min-width:280px; max-width:480px">
+    <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">16 / 16</span>
   </div>
   <canvas id="grid" width="900" height="900"></canvas>
   <div class="legend">
-    <span><span class="swatch" style="background:#388e3c"></span>Tree footprint (cuttable in this layout)</span>
-    <span><span class="swatch" style="background:#4a3a26"></span>Cutting annulus (saws placed)</span>
-    <span><span class="swatch" style="background:#3a3a3a"></span>Inner uncovered (no saw yet)</span>
+    <span><span class="swatch" style="background:#388e3c"></span>Cuttable tree (entire footprint in current cutting ring)</span>
+    <span><span class="swatch" style="background:#1b3a1c;border:1px dashed #4a704c"></span>Planned tree (not yet cuttable at K)</span>
+    <span><span class="swatch" style="background:#4a3a26"></span>Cutting ring (current saws)</span>
+    <span><span class="swatch" style="background:#3a3a3a"></span>Planned future ring (saws not yet placed)</span>
+    <span><span class="swatch" style="background:#262626"></span>Off-plan (never planned to cut)</span>
     <span><span class="swatch" style="background:#ffb300"></span>Mechanical bearing</span>
   </div>
-  <footer>Each (target chassis, saws-placed) pair is precomputed: the
-   optimal placement is solved by OR-tools CP-SAT with the constraint
-   that every 2x2 tree footprint lies entirely inside the cutting
-   annulus (R-K)<sup>2</sup> &lt; x<sup>2</sup>+y<sup>2</sup> &le; R<sup>2</sup>.
-   Saplings = 4 x trees.</footer>
+  <footer>Layout is precomputed for each (target chassis, total saws T)
+   pair: optimal MIS via CP-SAT, restricted so every 2x2 footprint
+   lies in the planned cutting ring (R-T)<sup>2</sup> &lt;
+   x<sup>2</sup>+y<sup>2</sup> &le; R<sup>2</sup>. The "Saws placed K"
+   slider then dims trees still inside the inner uncovered region
+   d<sup>2</sup> &le; (R-K)<sup>2</sup>. Saplings = 4 x trees.</footer>
 </div>
 <script>
 const SOLUTIONS = {data_json};
@@ -167,13 +175,14 @@ const SAPLINGS_PER_TREE = 4;
 const canvas = document.getElementById('grid');
 const ctx = canvas.getContext('2d');
 const select = document.getElementById('chassis');
+const totalSlider = document.getElementById('total');
+const totalLabel = document.getElementById('total-label');
 const currentSlider = document.getElementById('current');
 const currentLabel = document.getElementById('current-label');
 
 Object.keys(SOLUTIONS).map(Number).sort((a,b) => a-b).forEach(n => {{
   const opt = document.createElement('option');
   opt.value = n;
-  // Text gets filled in by refreshDropdown() once we know K.
   opt.textContent = `${{n}} chassis`;
   select.appendChild(opt);
 }});
@@ -182,15 +191,23 @@ function currentStrategy() {{
   return document.querySelector('input[name="strat"]:checked').value;
 }}
 
-function refreshDropdown(K) {{
+function refreshDropdown(T) {{
   for (let i = 0; i < select.options.length; i++) {{
     const opt = select.options[i];
     const n = Number(opt.value);
     const sol = SOLUTIONS[n];
-    const Keff = Math.min(K, sol.radius);
-    const o = sol.saws[Keff];
-    opt.textContent = `${{n}} chassis (R=${{sol.radius}}, K=${{Keff}}: opt ${{o.opt.length}} / struct ${{o.struct.length}})`;
+    const Teff = Math.min(T, sol.radius);
+    const o = sol.saws[Teff];
+    opt.textContent = `${{n}} chassis (R=${{sol.radius}}, T=${{Teff}}: opt ${{o.opt.length}} / struct ${{o.struct.length}})`;
   }}
+}}
+
+function isTreeCuttable(ax, ay, Ru2) {{
+  for (const [dx, dy] of [[0,0],[1,0],[0,1],[1,1]]) {{
+    const tx = ax + dx, ty = ay + dy;
+    if (tx * tx + ty * ty <= Ru2) return false;
+  }}
+  return true;
 }}
 
 function render() {{
@@ -198,27 +215,43 @@ function render() {{
   const sol = SOLUTIONS[N];
   const R = sol.radius;
 
-  currentSlider.max = R;
-  let K = Number(currentSlider.value);
-  if (K > R) {{ K = R; currentSlider.value = R; }}
-  if (K < 0) {{ K = 0; currentSlider.value = 0; }}
-  const Ru = R - K;
-  const Ru2 = Ru * Ru;
-  currentLabel.textContent = `${{K}} / ${{R}}`;
+  // Total saws T: cap to current target's R, used to pick the layout.
+  totalSlider.max = R;
+  let T = Number(totalSlider.value);
+  if (T > R) {{ T = R; totalSlider.value = R; }}
+  if (T < 0) {{ T = 0; totalSlider.value = 0; }}
+  totalLabel.textContent = `${{T}} / ${{R}}`;
 
-  refreshDropdown(K);
+  // Saws placed K: 0..T (can't place more than planned).
+  currentSlider.max = T;
+  let K = Number(currentSlider.value);
+  if (K > T) {{ K = T; currentSlider.value = T; }}
+  if (K < 0) {{ K = 0; currentSlider.value = 0; }}
+  currentLabel.textContent = `${{K}} / ${{T}}`;
+
+  // Planned outer ring (warm zone in stats / disc): (R-T)^2 < d^2 <= R^2
+  // Currently cuttable ring: (R-K)^2 < d^2 <= R^2
+  const Rt = R - T;
+  const Rt2 = Rt * Rt;
+  const Rc = R - K;
+  const Rc2 = Rc * Rc;
+
+  refreshDropdown(T);
 
   const strat = currentStrategy();
-  const sawsData = sol.saws[K];
+  const sawsData = sol.saws[T];
   const trees = (strat === 'optimal') ? sawsData.opt : sawsData.struct;
   const optCount = sawsData.opt.length;
   const treeCount = trees.length;
+  const cuttable = trees.filter(([ax, ay]) => isTreeCuttable(ax, ay, Rc2));
+  const cuttableCount = cuttable.length;
   const saplings = treeCount * SAPLINGS_PER_TREE;
+  const cuttableSaplings = cuttableCount * SAPLINGS_PER_TREE;
   const gap = treeCount - optCount;
 
   document.getElementById('stat-radius').textContent = `${{R}}`;
-  document.getElementById('stat-trees').textContent = `${{treeCount}}`;
-  document.getElementById('stat-saplings').textContent = `${{saplings}}`;
+  document.getElementById('stat-trees').textContent = `${{cuttableCount}} / ${{treeCount}}`;
+  document.getElementById('stat-saplings').textContent = `${{cuttableSaplings}} / ${{saplings}}`;
   const gapEl = document.getElementById('stat-gap');
   if (strat === 'optimal') {{
     gapEl.textContent = '0';
@@ -246,32 +279,47 @@ function render() {{
   ctx.fillStyle = '#222';
   ctx.fillRect(offsetX, offsetY, gridPx, gridPx);
 
-  // Disc tiles: warm = cutting annulus, cool = inner uncovered.
+  // Disc tiles: three shades.
+  //   warm  (#4a3a26) = currently cutting (saws placed):    Rc^2 < d^2 <= R^2
+  //   cool  (#3a3a3a) = planned future ring (no saw yet):   Rt^2 < d^2 <= Rc^2
+  //   dim   (#262626) = off-plan inside disc:               d^2 <= Rt^2
   const R2 = R * R;
   for (let tx = -R; tx <= R; tx++) {{
     for (let ty = -R; ty <= R; ty++) {{
       const d2 = tx * tx + ty * ty;
       if (d2 <= R2) {{
         const [px, py] = tileToPx(tx, ty);
-        ctx.fillStyle = (d2 > Ru2) ? '#4a3a26' : '#3a3a3a';
+        let color;
+        if (d2 > Rc2) color = '#4a3a26';
+        else if (d2 > Rt2) color = '#3a3a3a';
+        else color = '#262626';
+        ctx.fillStyle = color;
         ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
       }}
     }}
   }}
 
-  // Tree footprints (every tree in this layout is cuttable by construction).
+  // Tree footprints. Every tree in this layout is "planned" (fits inside
+  // the planned cutting ring). Highlight only those whose entire 2x2
+  // also fits inside the currently-cuttable ring.
   trees.forEach(([ax, ay], idx) => {{
+    const active = isTreeCuttable(ax, ay, Rc2);
+    const fillColor = active ? '#388e3c' : '#1b3a1c';
+    const strokeColor = active ? '#81c784' : '#4a704c';
+    const labelColor = active ? '#ffffff' : '#7aa17c';
     for (const [dx, dy] of [[0,0],[1,0],[0,1],[1,1]]) {{
       const [px, py] = tileToPx(ax + dx, ay + dy);
-      ctx.fillStyle = '#388e3c';
+      ctx.fillStyle = fillColor;
       ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
     }}
     const [px, py] = tileToPx(ax, ay + 1);
-    ctx.strokeStyle = '#81c784';
+    ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 2;
+    if (!active) ctx.setLineDash([4, 3]);
     ctx.strokeRect(px + 1, py + 1, cell * 2 - 2, cell * 2 - 2);
+    ctx.setLineDash([]);
     if (cell >= 14) {{
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = labelColor;
       ctx.font = `bold ${{Math.max(10, Math.floor(cell * 0.6))}}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -310,12 +358,13 @@ function render() {{
   }}
 }}
 
-const STORAGE_KEY = 'create-tree-farm-prefs-v3';
+const STORAGE_KEY = 'create-tree-farm-prefs-v4';
 function savePrefs() {{
   try {{
     localStorage.setItem(STORAGE_KEY, JSON.stringify({{
       target: select.value,
-      saws: currentSlider.value,
+      total: totalSlider.value,
+      placed: currentSlider.value,
       strategy: currentStrategy(),
     }}));
   }} catch (e) {{ /* ignore */ }}
@@ -332,6 +381,13 @@ function rerender() {{
   savePrefs();
 }}
 select.addEventListener('change', rerender);
+totalSlider.addEventListener('input', () => {{
+  // When total saws shrinks, clamp placed too.
+  if (Number(currentSlider.value) > Number(totalSlider.value)) {{
+    currentSlider.value = totalSlider.value;
+  }}
+  rerender();
+}});
 currentSlider.addEventListener('input', rerender);
 document.querySelectorAll('input[name="strat"]').forEach(
     el => el.addEventListener('change', rerender));
@@ -340,18 +396,26 @@ const prefs = loadPrefs();
 if (prefs && SOLUTIONS[prefs.target]) {{
   select.value = prefs.target;
   const targetR = SOLUTIONS[prefs.target].radius;
-  currentSlider.max = targetR;
-  let savedSaws = (prefs.saws !== undefined) ? Number(prefs.saws) : targetR;
-  if (savedSaws > targetR) savedSaws = targetR;
-  if (savedSaws < 0) savedSaws = 0;
-  currentSlider.value = savedSaws;
+  totalSlider.max = targetR;
+  let savedT = (prefs.total !== undefined) ? Number(prefs.total) : targetR;
+  if (savedT > targetR) savedT = targetR;
+  if (savedT < 0) savedT = 0;
+  totalSlider.value = savedT;
+  currentSlider.max = savedT;
+  let savedK = (prefs.placed !== undefined) ? Number(prefs.placed) : savedT;
+  if (savedK > savedT) savedK = savedT;
+  if (savedK < 0) savedK = 0;
+  currentSlider.value = savedK;
   const stratEl = document.querySelector(
       `input[name="strat"][value="${{prefs.strategy}}"]`);
   if (stratEl) stratEl.checked = true;
 }} else {{
   select.value = '17';
-  currentSlider.max = SOLUTIONS['17'].radius;
-  currentSlider.value = SOLUTIONS['17'].radius;
+  const R17 = SOLUTIONS['17'].radius;
+  totalSlider.max = R17;
+  totalSlider.value = R17;
+  currentSlider.max = R17;
+  currentSlider.value = R17;
 }}
 render();
 </script>
