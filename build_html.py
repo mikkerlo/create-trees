@@ -145,6 +145,7 @@ html = f"""<!DOCTYPE html>
       <div class="stat"><span class="label">Radius</span><span class="value" id="stat-radius">-</span></div>
       <div class="stat"><span class="label">Trees (cuttable/planned)</span><span class="value" id="stat-trees">-</span></div>
       <div class="stat"><span class="label">Saplings (cuttable/planned)</span><span class="value" id="stat-saplings">-</span></div>
+      <div class="stat"><span class="label">Yield (blocks/h)</span><span class="value" id="stat-yield">-</span></div>
       <div class="stat"><span class="label">vs optimal at T</span><span class="value" id="stat-gap">-</span></div>
     </div>
   </div>
@@ -152,6 +153,9 @@ html = f"""<!DOCTYPE html>
     <label for="current">Saws placed (K of T):</label>
     <input type="range" id="current" min="0" max="16" value="16" step="1" style="flex:1; min-width:280px; max-width:480px">
     <span id="current-label" style="font-weight:700; color:#81c784; min-width:90px">16 / 16</span>
+    <label style="margin-left:10px">Blocks/tree/hour:</label>
+    <input type="number" id="rate" min="0" step="1" value="713" style="width:90px; background:#1a1a1a; color:#e0e0e0; border:1px solid #555; padding:4px 8px; border-radius:4px;">
+    <span style="color:#888; font-size:13px">(default 712.75 = your 17106/24 measurement at 4 RPM)</span>
   </div>
   <canvas id="grid" width="900" height="900"></canvas>
   <div class="legend">
@@ -179,6 +183,7 @@ const totalSlider = document.getElementById('total');
 const totalLabel = document.getElementById('total-label');
 const currentSlider = document.getElementById('current');
 const currentLabel = document.getElementById('current-label');
+const rateInput = document.getElementById('rate');
 
 Object.keys(SOLUTIONS).map(Number).sort((a,b) => a-b).forEach(n => {{
   const opt = document.createElement('option');
@@ -249,9 +254,20 @@ function render() {{
   const cuttableSaplings = cuttableCount * SAPLINGS_PER_TREE;
   const gap = treeCount - optCount;
 
+  const rate = Math.max(0, Number(rateInput.value) || 0);
+  const yieldNow = cuttableCount * rate;
+  const yieldFull = treeCount * rate;
+  function fmt(n) {{
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+    if (n >= 10_000) return (n / 1_000).toFixed(1) + 'k';
+    if (n >= 1_000) return n.toLocaleString();
+    return Math.round(n).toString();
+  }}
+
   document.getElementById('stat-radius').textContent = `${{R}}`;
   document.getElementById('stat-trees').textContent = `${{cuttableCount}} / ${{treeCount}}`;
   document.getElementById('stat-saplings').textContent = `${{cuttableSaplings}} / ${{saplings}}`;
+  document.getElementById('stat-yield').textContent = `${{fmt(yieldNow)}} / ${{fmt(yieldFull)}}`;
   const gapEl = document.getElementById('stat-gap');
   if (strat === 'optimal') {{
     gapEl.textContent = '0';
@@ -358,7 +374,7 @@ function render() {{
   }}
 }}
 
-const STORAGE_KEY = 'create-tree-farm-prefs-v4';
+const STORAGE_KEY = 'create-tree-farm-prefs-v5';
 function savePrefs() {{
   try {{
     localStorage.setItem(STORAGE_KEY, JSON.stringify({{
@@ -366,6 +382,7 @@ function savePrefs() {{
       total: totalSlider.value,
       placed: currentSlider.value,
       strategy: currentStrategy(),
+      rate: rateInput.value,
     }}));
   }} catch (e) {{ /* ignore */ }}
 }}
@@ -389,6 +406,7 @@ totalSlider.addEventListener('input', () => {{
   rerender();
 }});
 currentSlider.addEventListener('input', rerender);
+rateInput.addEventListener('input', rerender);
 document.querySelectorAll('input[name="strat"]').forEach(
     el => el.addEventListener('change', rerender));
 
@@ -406,6 +424,7 @@ if (prefs && SOLUTIONS[prefs.target]) {{
   if (savedK > savedT) savedK = savedT;
   if (savedK < 0) savedK = 0;
   currentSlider.value = savedK;
+  if (prefs.rate !== undefined) rateInput.value = prefs.rate;
   const stratEl = document.querySelector(
       `input[name="strat"][value="${{prefs.strategy}}"]`);
   if (stratEl) stratEl.checked = true;
